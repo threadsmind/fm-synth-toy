@@ -1,63 +1,103 @@
-/*
-TODO - what if we DID do the playv2 thing where oscs always play. Then when a note is played we set frequency and play the envelopes?
-
-TODO - live play
-*/
-
 export default class FMSynth {
   constructor(context) {
     this._context = context;
     this._output = null;
-    this._carrierGainEnvelope = null;
-    this._carrier = null;
-    this._modulator = null;
-    this._modulatorGainEnvelope = null;
-    this._basePitch = 55;
+    this._carrier = {};
+    this._modulators = {};
+    this._testTone = 55; // in hertz - at least move a default to properties
+    this._glideTime = 0.01; // in seconds - move to properties
+    this._playing = false;
   }
 
-  create() {
+  init() {
+    // check for a valid audio context
     if (!this._context) {
       console.log('synth error. no context');
       return;
     }
-    // output node
+
+    // build carrier
+    // TODO maybe have properties with defaults?
+    this._carrier = {
+      osc: new OscillatorNode(
+        this._context,
+        { type: 'sine', frequency: this._testTone }
+      ),
+      pitchDrift: 10, // to be used like: osc.detune.setValueAtTime((Math.random() * osc.pitchDrift), context.currentTime)
+      volume: new GainNode(this._context), // to be used with gain envelope
+      gainEnvelope: { // TODO there's probably a better way to represent this data
+        amp: [0.7, 0.4],
+        attack: 0.01,
+        decay: 0.12,
+        release: 0.20,
+      },
+    };
+
+    // build modulators
+    for (let i = 0; i < 5; i++) {
+      this._modulators[`modulator${i}`] = {
+        osc: new OscillatorNode(
+          this._context,
+          { type: 'sine', frequency: this._testTone }
+        ),
+        pitchDrift: 10, // to be used like: osc.detune.setValueAtTime((Math.random() * osc.pitchDrift), context.currentTime)
+        volume: new GainNode(this._context), // to be used with gain envelope
+        gainEnvelope: { // TODO there's probably a better way to represent this data
+          amp: [0.7, 0.4],
+          attack: 0.01,
+          decay: 0.12,
+          release: 0.20,
+        },
+      }
+    }
+
+    // build output node
+    // used to control master volume level for the synth
     this._output = new GainNode(this._context, { gain: 0.7 });
     this._output.connect(this._context.destination);
     // carrier gain envelope
-    this._carrierGainEnvelope = new GainNode(this._context);
-    this._carrierGainEnvelope.connect(this._output);
-    this._carrierGainEnvelope.gain.setValueAtTime(0, this._context.currentTime);
+    this._carrier.volume.connect(this._output);
+    this._carrier.volume.gain.setValueAtTime(0, this._context.currentTime);
     // carrier osc
-    this._carrier = new OscillatorNode(this._context, { type: 'sine', frequency: this._basePitch, detune: Math.random() * 10 });
-    this._carrier.connect(this._carrierGainEnvelope);
-    this._carrier.start(this._context.currentTime);
+    this._carrier.osc.connect(this._carrier.volume);
+    this._carrier.osc.start(this._context.currentTime);
+
+    // TODO just for test. Itterate over this
     // modulator gain envelope
-    this._modulatorGainEnvelope = new GainNode(this._context);
-    this._modulatorGainEnvelope.connect(this._carrier.frequency);
-    this._modulatorGainEnvelope.gain.setValueAtTime(0, this._context.currentTime);
+    this._modulators.modulator0.volume.connect(this._carrier.osc.frequency);
+    this._modulators.modulator0.volume.gain.setValueAtTime(0, this._context.currentTime);
     //modulator osc
-    this._modulator = new OscillatorNode(this._context, { type: 'sine', frequency: this._basePitch * 3, detune: Math.random() * 10});
-    this._modulator.connect(this._modulatorGainEnvelope);
-    this._modulator.start(this._context.currentTime);
+    this._modulators.modulator0.osc.connect(this._modulators.modulator0.volume);
+    this._modulators.modulator0.osc.start(this._context.currentTime);
   }
 
+  // plays a test tone
   play(pitch) {
-    //randomize pitch for testing
-    pitch = (!pitch) ? (Math.random() * 1000) : pitch;
+    // input pitch or test tone
+    pitch = (pitch) ? pitch : this._testTone;
     // set input / random pitch
-    this._carrier.frequency.linearRampToValueAtTime(pitch, this._context.currentTime + 0.01);
-    this._modulator.frequency.linearRampToValueAtTime(pitch * 3, this._context.currentTime + 0.01);
+    this._carrier.osc.frequency.linearRampToValueAtTime(pitch, this._context.currentTime + this._glideTime);
+    this._modulators.modulator0.osc.frequency.linearRampToValueAtTime(pitch * 3, this._context.currentTime + 0.01);
     // carrier gain envelope
-    this._carrierGainEnvelope.gain.setValueAtTime(0, this._context.currentTime);
-    this._carrierGainEnvelope.gain.linearRampToValueAtTime(0.7, this._context.currentTime + 0.01);
-    this._carrierGainEnvelope.gain.linearRampToValueAtTime(0.4, this._context.currentTime + 0.12);
-    this._carrierGainEnvelope.gain.linearRampToValueAtTime(0.4, this._context.currentTime + 0.18);
-    this._carrierGainEnvelope.gain.linearRampToValueAtTime(0, this._context.currentTime + 0.20);
+    this._carrier.volume.gain.setValueAtTime(0, this._context.currentTime);
+    this._carrier.volume.gain.linearRampToValueAtTime(0.7, this._context.currentTime + 0.01);
+    this._carrier.volume.gain.linearRampToValueAtTime(0.4, this._context.currentTime + 0.12);
     // modulator gain envelope
-    this._modulatorGainEnvelope.gain.setValueAtTime(0, this._context.currentTime);
-    this._modulatorGainEnvelope.gain.linearRampToValueAtTime(202, this._context.currentTime + 0.05);
-    this._modulatorGainEnvelope.gain.linearRampToValueAtTime(198, this._context.currentTime + 0.12);
-    this._modulatorGainEnvelope.gain.linearRampToValueAtTime(10, this._context.currentTime + 0.18);
-    this._modulatorGainEnvelope.gain.linearRampToValueAtTime(0, this._context.currentTime + 0.20);
+    this._modulators.modulator0.volume.gain.setValueAtTime(0, this._context.currentTime);
+    this._modulators.modulator0.volume.gain.linearRampToValueAtTime(202, this._context.currentTime + 0.05);
+    this._modulators.modulator0.volume.gain.linearRampToValueAtTime(198, this._context.currentTime + 0.12);
+    // playing flag... maybe unneeded, but it's here for now
+    this._playing = true;
+  }
+
+  // stops the currently playing sound
+  stop() {
+    this._carrier.volume.gain.linearRampToValueAtTime(0, this._context.currentTime + 0.20);
+    // this._modulators.modulator0.volume.gain.linearRampToValueAtTime(0, this._context.currentTime + 0.20);
+    this._playing = false;
+  }
+
+  get isPlaying() {
+    return this._playing;
   }
 }
